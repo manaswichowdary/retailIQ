@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\SupplierController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -14,3 +15,5 @@ Route::get('/products/{product}', [ProductController::class, 'show']);
 
 Route::get('/suppliers', [SupplierController::class, 'index']);
 Route::get('/suppliers/{supplier}', [SupplierController::class, 'show']);
+
+Route::get('/sales', [SaleController::class, 'index']);
