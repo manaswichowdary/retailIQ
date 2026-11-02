@@ -1,58 +1,159 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# RetailIQ
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+![PHP](https://img.shields.io/badge/PHP-8.4-777BB4)
+![Laravel](https://img.shields.io/badge/Laravel-13-FF2D20)
+![MySQL](https://img.shields.io/badge/MySQL-8-4479A1)
+![Status](https://img.shields.io/badge/status-API%20complete%2C%20dashboard%20in%20progress-orange)
 
-## About Laravel
+An inventory analytics API for small retail stores. It tracks products, suppliers and weekly sales, and tells the store owner which products to reorder **before** they run out, based on how fast each product sells and how long its supplier takes to deliver.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## The Problem
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Small stores usually reorder by gut feeling. They either run out of their best sellers while waiting on a slow supplier, or they tie up cash in boxes of stock that barely moves. The fix is a reorder point: the stock level where you need to order now so the new stock arrives before you hit zero. RetailIQ calculates that for every product, using real sales history.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## How the Reorder Point Works
 
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+```
+weekly average  = average units sold over the last 4 weeks
+weeks of waiting = supplier lead time (days) / 7
+reorder point   = ceil(weekly average × weeks of waiting + safety stock)
+needs reorder   = current stock <= reorder point
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+For example, with the sample data:
 
-## Contributing
+| Product | Stock | Avg per week | Supplier lead time | Safety stock | Reorder point | Reorder? |
+|---|---|---|---|---|---|---|
+| Wireless Charger | 8 | 6.0 | 7 days | 4 | 10 | **Yes** |
+| Lightning Cable | 12 | 10.0 | 10 days | 5 | 20 | **Yes** |
+| Leather Case | 22 | 5.5 | 14 days | 6 | 17 | No |
+| Phone Charger | 60 | 15.5 | 7 days | 5 | 21 | No |
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+`GET /api/reorder-suggestions` returns this analysis for every product, with the ones that need reordering first.
 
-## Code of Conduct
+## Features
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+- REST API for products, suppliers and sales
+- Reorder suggestions for every product, based on sales speed, supplier lead time and safety stock
+- Sales filtering by product and by time window (for example, the last 2 weeks)
+- Request validation on new products (unique SKU, valid supplier, no negative prices or stock)
+- Seed data with 3 suppliers, 8 products and 8 weeks of sales, so the API is useful right after setup
 
-## Security Vulnerabilities
+## Tech Stack
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+| Layer | Technology |
+|---|---|
+| Backend | PHP 8.4, Laravel 13 |
+| Database | MySQL 8 (Docker), SQLite for quick local runs |
+| Auth (set up for upcoming user roles) | Laravel Sanctum |
+| Frontend (next) | React dashboard |
 
-## License
+## Architecture
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```mermaid
+flowchart LR
+    C([Client]) -- "JSON over HTTP" --> R["routes/api.php"]
+    R --> PC["ProductController"]
+    R --> SC["SupplierController"]
+    R --> SA["SaleController"]
+    R --> RC["ReorderController"]
+    RC --> RS["ReorderService<br/>reorder point math"]
+    PC & SC & SA & RS --> M["Eloquent models<br/>Product, Supplier, Sale"]
+    M --> DB[("MySQL")]
+```
+
+### Database
+
+```mermaid
+erDiagram
+    SUPPLIER ||--o{ PRODUCT : supplies
+    PRODUCT ||--o{ SALE : has
+
+    SUPPLIER {
+        int id PK
+        string name
+        int lead_time_days
+    }
+    PRODUCT {
+        int id PK
+        int supplier_id FK
+        string name
+        string sku "unique"
+        string category
+        decimal price
+        int stock
+        int safety_stock
+    }
+    SALE {
+        int id PK
+        int product_id FK
+        int quantity
+        decimal unit_price
+        datetime sold_at "indexed"
+    }
+```
+
+## API Endpoints
+
+| Method | Endpoint | What it does |
+|---|---|---|
+| GET | `/api/products` | List all products with their supplier |
+| GET | `/api/products/{id}` | One product with its supplier |
+| POST | `/api/products` | Add a product (validated) |
+| GET | `/api/suppliers` | List suppliers with how many products each one supplies |
+| GET | `/api/suppliers/{id}` | One supplier with its products |
+| GET | `/api/sales` | List sales, newest first. Filters: `?product_id=3`, `?weeks=2` |
+| GET | `/api/reorder-suggestions` | Reorder analysis for every product, items to reorder first |
+
+## Key Decisions
+
+- **The reorder math lives in its own service.** `ReorderService` holds the formula, and the controller only fetches products and returns the results. The math can be tested and reused (for example, by a future dashboard or a weekly email) without touching HTTP code.
+- **Lead time belongs to the supplier, not the product.** Every product from the same supplier waits the same amount of time, so it's stored once on the `suppliers` table.
+- **Safety stock is set per product.** A popular item can carry a bigger buffer than a slow one, instead of using one rule for the whole store.
+- **Prices are stored on each sale.** `unit_price` is saved at the time of sale, so changing a product's price later doesn't rewrite past revenue.
+- **`sold_at` is indexed.** Sales are always filtered and sorted by date, so the index keeps those queries fast as the table grows.
+- **Validation happens before anything touches the database.** New products need a real supplier, a unique SKU and non-negative price and stock, otherwise the API returns a 422 with the reasons.
+
+## Run It Locally
+
+You need PHP 8.4+, Composer, and either Docker (for MySQL) or SQLite.
+
+```bash
+git clone https://github.com/manaswichowdary/retailIQ.git
+cd retailIQ
+composer install
+cp .env.example .env
+php artisan key:generate
+```
+
+**Quick start with SQLite** (the default in `.env.example`):
+
+```bash
+touch database/database.sqlite
+php artisan migrate --seed
+php artisan serve
+```
+
+**Or use MySQL in Docker:** run `docker compose up -d`, then set these in `.env` before migrating:
+
+```
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=retailiq
+DB_USERNAME=retailiq
+DB_PASSWORD=secret
+```
+
+Then try it:
+
+```bash
+curl http://localhost:8000/api/reorder-suggestions
+curl "http://localhost:8000/api/sales?weeks=2"
+```
+
+## What's Next
+
+- React dashboard with sales charts and a reorder list
+- Staff and manager roles (the `role` column and Sanctum are already in place)
+- Feature tests for every endpoint and unit tests for `ReorderService`
