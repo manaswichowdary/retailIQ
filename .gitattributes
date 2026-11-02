@@ -9,3 +9,6 @@
 /.github export-ignore
 CHANGELOG.md export-ignore
 .styleci.yml export-ignore
+
+# Language stats: the default Laravel welcome page is framework boilerplate
+resources/views/welcome.blade.php linguist-vendored
